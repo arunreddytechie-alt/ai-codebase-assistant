@@ -54,44 +54,34 @@ class ChunkExtractor:
 
 
     # ==============================
-    # FASTAPI ROUTE DETECTOR
+    # FASTAPI ROUTE EXTRACTOR
     # ==============================
 
     def _extract_fastapi_routes(self, code: str):
 
         routes = []
 
-        patterns = [
-            r"@app\.get\([\"']([^\"']+)[\"']",
-            r"@app\.post\([\"']([^\"']+)[\"']",
-            r"@app\.put\([\"']([^\"']+)[\"']",
-            r"@app\.delete\([\"']([^\"']+)[\"']",
-            r"@app\.patch\([\"']([^\"']+)[\"']",
+        pattern = r'@(app|router)\.(get|post|put|delete|patch)\(["\']([^"\']+)["\']'
 
-            r"@router\.get\([\"']([^\"']+)[\"']",
-            r"@router\.post\([\"']([^\"']+)[\"']",
-            r"@router\.put\([\"']([^\"']+)[\"']",
-            r"@router\.delete\([\"']([^\"']+)[\"']",
-            r"@router\.patch\([\"']([^\"']+)[\"']",
-        ]
+        matches = re.finditer(pattern, code)
 
-        for pattern in patterns:
+        for match in matches:
 
-            matches = re.findall(pattern, code)
-
-            routes.extend(matches)
+            routes.append({
+                "method": match.group(2).upper(),
+                "path": match.group(3)
+            })
 
         return routes
 
 
     # ==============================
-    # PYTHON EXTRACTION (WITH API DETECTION)
+    # PYTHON EXTRACTION (FIXED FOR CHROMADB)
     # ==============================
 
     def _extract_python_chunks(self, file_info: Dict) -> List[Dict]:
 
         file_path = file_info["file_path"]
-
         code = self._read_file(file_path)
 
         if not code:
@@ -100,23 +90,18 @@ class ChunkExtractor:
         chunks = []
 
         class_name = self._extract_python_class_name(code)
-
         functions = self._extract_python_functions(code)
 
-        # Detect APIs at FILE LEVEL
-        
+        # Detect all API routes at file level
         api_routes = self._extract_fastapi_routes(code)
 
-        # CRITICAL FIX: ChromaDB does not allow empty list
-        if not api_routes:
-            api_routes = None
-
-        is_api_file = api_routes is not None
+        is_api_file = len(api_routes) > 0
 
 
-
-
+        # ==============================
         # FUNCTION CHUNKS
+        # ==============================
+
         for func in functions:
 
             if class_name:
@@ -125,6 +110,8 @@ class ChunkExtractor:
                 component_id = func["function_name"]
 
             chunk_id = self._generate_chunk_id(file_info, component_id)
+
+            func_routes = self._extract_fastapi_routes(func["function_code"])
 
             metadata = {
                 "repo_name": file_info["repo_name"],
@@ -136,13 +123,21 @@ class ChunkExtractor:
                 "function_name": func["function_name"],
                 "class_name": class_name,
 
-                "chunk_type": "api" if is_api_file else "function",
+                "chunk_type": "api" if func_routes else "function",
+                "is_api": bool(func_routes),
 
-                # API METADATA
-                "is_api": is_api_file,
-                "api_routes": api_routes if api_routes else None,
-                "framework": "fastapi" if is_api_file else None
+                "framework": "fastapi" if func_routes else None
             }
+
+            # CRITICAL FIX: store api_routes as STRING (not list/dict)
+            if func_routes:
+
+                routes_str = []
+
+                for route in func_routes:
+                    routes_str.append(f"{route['method']} {route['path']}")
+
+                metadata["api_routes"] = ", ".join(routes_str)
 
             chunks.append({
                 "component_id": component_id,
@@ -152,9 +147,11 @@ class ChunkExtractor:
             })
 
 
-        # FILE LEVEL CHUNK (IMPORTANT FOR API QUESTIONS)
-        component_id = file_info["file_name"]
+        # ==============================
+        # FILE LEVEL CHUNK
+        # ==============================
 
+        component_id = file_info["file_name"]
         chunk_id = self._generate_chunk_id(file_info, component_id)
 
         file_metadata = {
@@ -166,11 +163,20 @@ class ChunkExtractor:
             "component_id": component_id,
 
             "chunk_type": "file",
-
             "is_api": is_api_file,
-            "api_routes": api_routes,
+
             "framework": "fastapi" if is_api_file else None
         }
+
+        # CRITICAL FIX: store api_routes as STRING
+        if api_routes:
+
+            routes_str = []
+
+            for route in api_routes:
+                routes_str.append(f"{route['method']} {route['path']}")
+
+            file_metadata["api_routes"] = ", ".join(routes_str)
 
         chunks.append({
             "component_id": component_id,
@@ -202,7 +208,6 @@ class ChunkExtractor:
         for match in re.finditer(pattern, code):
 
             func_name = match.group(1)
-
             start = match.start()
 
             func_code = self._extract_python_block(code, start)
@@ -220,7 +225,6 @@ class ChunkExtractor:
         lines = code[start_index:].split("\n")
 
         block = []
-
         indent = None
 
         for line in lines:
@@ -252,7 +256,6 @@ class ChunkExtractor:
             return []
 
         component_id = file_info["file_name"]
-
         chunk_id = self._generate_chunk_id(file_info, component_id)
 
         return [{
@@ -271,7 +274,7 @@ class ChunkExtractor:
 
 
     # ==============================
-    # JAVA EXTRACTION (UNCHANGED)
+    # JAVA EXTRACTION
     # ==============================
 
     def _extract_java_chunks(self, file_info: Dict):
@@ -284,7 +287,6 @@ class ChunkExtractor:
         class_name = self._extract_java_class_name(code)
 
         component_id = class_name
-
         chunk_id = self._generate_chunk_id(file_info, component_id)
 
         return [{

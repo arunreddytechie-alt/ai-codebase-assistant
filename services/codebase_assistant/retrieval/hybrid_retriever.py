@@ -33,7 +33,6 @@ class HybridRetriever:
         print(f"Repo: {repo_name}")
         print(f"Intent: {intent}")
 
-        # Intent routing
         if intent == "overview":
             return self._retrieve_overview(repo_name)
 
@@ -49,26 +48,71 @@ class HybridRetriever:
         elif intent == "dependency":
             return self._retrieve_dependencies(repo_name)
 
-        # Default → semantic + graph
         return self._retrieve_semantic_graph(query, repo_name, top_k, expand_k)
 
 
     # =====================================
-    # OVERVIEW RETRIEVAL
+    # API RETRIEVAL — FIXED VERSION
     # =====================================
 
-    def _retrieve_overview(self, repo_name):
+    def _retrieve_api(self, repo_name):
+
+        print("Scanning vector DB for API metadata...")
 
         results = self.vector_store.collection.get()
 
         docs = results.get("documents", [])
         metas = results.get("metadatas", [])
 
-        chunks = []
+        api_chunks = []
 
         for i, meta in enumerate(metas):
 
             if meta.get("repo_name") != repo_name:
+                continue
+
+            api_routes = meta.get("api_routes")
+            is_api = meta.get("is_api", False)
+
+            # CRITICAL FIX: use api_routes metadata
+            if api_routes and api_routes != "None":
+
+                print(f"Found API file: {meta.get('file_name')}")
+                print(f"Routes: {api_routes}")
+
+                chunk = f"""
+FILE: {meta.get('file_name')}
+
+API ROUTES:
+{api_routes}
+
+CODE:
+{docs[i]}
+"""
+
+                api_chunks.append(chunk)
+
+        print(f"API chunks found: {len(api_chunks)}")
+
+        return api_chunks[:20]
+
+
+    # =====================================
+    # OVERVIEW
+    # =====================================
+
+    def _retrieve_overview(self, repo_name):
+
+        results = self.vector_store.collection.get()
+
+        docs = results["documents"]
+        metas = results["metadatas"]
+
+        chunks = []
+
+        for i, meta in enumerate(metas):
+
+            if meta["repo_name"] != repo_name:
                 continue
 
             file = meta.get("file_name", "").lower()
@@ -86,21 +130,21 @@ class HybridRetriever:
 
 
     # =====================================
-    # SETUP RETRIEVAL
+    # SETUP
     # =====================================
 
     def _retrieve_setup(self, repo_name):
 
         results = self.vector_store.collection.get()
 
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
+        docs = results["documents"]
+        metas = results["metadatas"]
 
         chunks = []
 
         for i, meta in enumerate(metas):
 
-            if meta.get("repo_name") != repo_name:
+            if meta["repo_name"] != repo_name:
                 continue
 
             file = meta.get("file_name", "").lower()
@@ -109,8 +153,6 @@ class HybridRetriever:
                 "readme" in file
                 or "requirements" in file
                 or "dockerfile" in file
-                or "config" in file
-                or "env" in file
             ):
                 chunks.append(docs[i])
 
@@ -120,59 +162,24 @@ class HybridRetriever:
 
 
     # =====================================
-    # API RETRIEVAL (Improved)
-    # =====================================
-
-    def _retrieve_api(self, repo_name):
-
-        results = self.vector_store.collection.get()
-
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
-
-        api_chunks = []
-
-        for i, meta in enumerate(metas):
-
-            if meta.get("repo_name") != repo_name:
-                continue
-
-            # Multiple detection strategies
-
-            if (
-                meta.get("chunk_type") == "api"
-                or meta.get("http_method")
-                or meta.get("api_path")
-                or meta.get("is_api_file")
-                or "route" in meta.get("file_name", "").lower()
-                or "controller" in meta.get("file_name", "").lower()
-            ):
-                api_chunks.append(docs[i])
-
-        print(f"API chunks: {len(api_chunks)}")
-
-        return api_chunks[:20]
-
-
-    # =====================================
-    # ARCHITECTURE RETRIEVAL
+    # ARCHITECTURE
     # =====================================
 
     def _retrieve_architecture(self, repo_name):
 
         results = self.vector_store.collection.get()
 
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
+        docs = results["documents"]
+        metas = results["metadatas"]
 
         chunks = []
 
         for i, meta in enumerate(metas):
 
-            if meta.get("repo_name") != repo_name:
+            if meta["repo_name"] != repo_name:
                 continue
 
-            if meta.get("chunk_type") in ["class", "file"]:
+            if meta.get("chunk_type") in ["file", "class"]:
                 chunks.append(docs[i])
 
         print(f"Architecture chunks: {len(chunks)}")
@@ -181,31 +188,26 @@ class HybridRetriever:
 
 
     # =====================================
-    # DEPENDENCY RETRIEVAL
+    # DEPENDENCIES
     # =====================================
 
     def _retrieve_dependencies(self, repo_name):
 
         results = self.vector_store.collection.get()
 
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
+        docs = results["documents"]
+        metas = results["metadatas"]
 
         chunks = []
 
         for i, meta in enumerate(metas):
 
-            if meta.get("repo_name") != repo_name:
+            if meta["repo_name"] != repo_name:
                 continue
 
             file = meta.get("file_name", "").lower()
 
-            if (
-                "requirements" in file
-                or "pom.xml" in file
-                or "package.json" in file
-                or "build.gradle" in file
-            ):
+            if "requirements" in file:
                 chunks.append(docs[i])
 
         print(f"Dependency chunks: {len(chunks)}")
@@ -214,18 +216,12 @@ class HybridRetriever:
 
 
     # =====================================
-    # SEMANTIC + GRAPH RETRIEVAL
+    # SEMANTIC + GRAPH
     # =====================================
 
-    def _retrieve_semantic_graph(
-        self,
-        query,
-        repo_name,
-        top_k,
-        expand_k
-    ):
+    def _retrieve_semantic_graph(self, query, repo_name, top_k, expand_k):
 
-        print("Using semantic + graph retrieval")
+        print("Using semantic retrieval")
 
         semantic = self.vector_store.search(
             query=query,
@@ -290,14 +286,14 @@ class HybridRetriever:
 
         results = self.vector_store.collection.get()
 
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
+        docs = results["documents"]
+        metas = results["metadatas"]
 
         chunks = []
 
         for i, meta in enumerate(metas):
 
-            if meta.get("repo_name") != repo_name:
+            if meta["repo_name"] != repo_name:
                 continue
 
             if meta.get("component_id") in component_ids:

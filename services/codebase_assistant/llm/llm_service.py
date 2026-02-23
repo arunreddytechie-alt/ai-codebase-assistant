@@ -27,10 +27,8 @@ class LLMService:
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
-        # Hybrid retriever
         self.retriever = HybridRetriever()
 
-        # Intent router
         self.intent_router = IntentRouter()
 
         print("LLM Service ready")
@@ -42,22 +40,19 @@ class LLMService:
 
     def ask(self, question: str, repo_name: str):
 
-        print(f"\n===================================")
+        print("\n===================================")
         print(f"Repo: {repo_name}")
         print(f"Question: {question}")
-        print(f"===================================")
+        print("===================================")
 
-        # =====================================
-        # STEP 1: DETECT INTENT
-        # =====================================
-
+        # STEP 1: Detect intent
         intent = self.intent_router.detect_intent(question)
 
         print(f"Detected intent: {intent}")
 
 
         # =====================================
-        # STEP 2: SPECIAL HANDLING FOR API INTENT
+        # STEP 2: API INTENT → USE STRUCTURED SUMMARY
         # =====================================
 
         if intent == "api":
@@ -67,7 +62,7 @@ class LLMService:
             if api_summary:
 
                 prompt = f"""
-You are an expert backend architect.
+You are a senior backend architect.
 
 Use the API SUMMARY below to answer the question.
 
@@ -77,13 +72,18 @@ API SUMMARY:
 QUESTION:
 {question}
 
-ANSWER clearly and technically:
+Instructions:
+- List APIs clearly
+- Include HTTP method and path
+- Do NOT hallucinate
+
+ANSWER:
 """
 
                 return self._call_llm(prompt)
 
             else:
-                print("No structured API metadata found, falling back to retrieval")
+                print("No API metadata found, falling back to retrieval")
 
 
         # =====================================
@@ -106,7 +106,7 @@ ANSWER clearly and technically:
         # STEP 4: BUILD CONTEXT
         # =====================================
 
-        context = self._build_context(chunks)
+        context = self._build_context(chunks, repo_name)
 
         print("\nContext preview:")
         print(context[:500])
@@ -119,10 +119,7 @@ ANSWER clearly and technically:
         prompt = self._build_prompt(question, context)
 
 
-        # =====================================
-        # STEP 6: CALL OPENAI
-        # =====================================
-
+        # STEP 6: CALL LLM
         return self._call_llm(prompt)
 
 
@@ -136,22 +133,22 @@ ANSWER clearly and technically:
 
             model="gpt-4o-mini",
 
+            temperature=0,
+
             messages=[
                 {
                     "role": "system",
                     "content": (
                         "You are a senior software architect.\n"
-                        "Answer precisely using provided information.\n"
-                        "Do NOT hallucinate.\n"
+                        "Answer ONLY using provided information.\n"
+                        "Do NOT hallucinate."
                     )
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
-            ],
-
-            temperature=0
+            ]
         )
 
         return response.choices[0].message.content.strip()
@@ -161,9 +158,50 @@ ANSWER clearly and technically:
     # BUILD CONTEXT
     # =====================================
 
-    def _build_context(self, chunks):
+    def _build_context(self, chunks, repo_name):
 
-        return "\n\n".join(chunks[:15])
+        results = self.retriever.vector_store.collection.get()
+
+        metas = results.get("metadatas", [])
+
+        context_parts = []
+
+
+        # STEP 1: ADD API SUMMARY
+
+        api_lines = []
+
+        for meta in metas:
+
+            if meta.get("repo_name") != repo_name:
+                continue
+
+            routes = meta.get("api_routes")
+
+            if routes and isinstance(routes, list):
+
+                for route in routes:
+
+                    method = route.get("method")
+                    path = route.get("path")
+
+                    if method and path:
+                        api_lines.append(f"{method} {path}")
+
+
+        if api_lines:
+
+            context_parts.append("API ENDPOINT SUMMARY:")
+            context_parts.append("\n".join(sorted(set(api_lines))))
+            context_parts.append("\n")
+
+
+        # STEP 2: ADD CODE
+
+        context_parts.append("RELEVANT CODE:")
+        context_parts.append("\n\n".join(chunks[:10]))
+
+        return "\n".join(context_parts)
 
 
     # =====================================
@@ -175,14 +213,22 @@ ANSWER clearly and technically:
         return f"""
 You are analyzing a software codebase.
 
-Use the CODEBASE CONTEXT to answer the QUESTION.
+Use ONLY the provided context.
 
 Rules:
-- Answer ONLY from context
-- Do NOT hallucinate
-- If overview question → explain architecture clearly
-- If flow question → explain execution flow
-- If setup question → explain installation/setup steps
+
+If question is about APIs:
+- List HTTP method
+- List endpoint path
+- List handler function if present
+
+If question is about architecture:
+- Explain structure clearly
+
+If question is about setup:
+- Explain setup steps clearly
+
+DO NOT hallucinate.
 
 CODEBASE CONTEXT:
 {context}
@@ -195,7 +241,7 @@ ANSWER:
 
 
     # =====================================
-    # BUILD API SUMMARY (CRITICAL)
+    # BUILD API SUMMARY (FIXED)
     # =====================================
 
     def _build_api_summary(self, repo_name: str):
@@ -204,7 +250,7 @@ ANSWER:
 
         metas = results.get("metadatas", [])
 
-        apis = []
+        api_set = set()
 
         for meta in metas:
 
@@ -213,17 +259,28 @@ ANSWER:
 
             routes = meta.get("api_routes")
 
-            if routes:
-                apis.extend(routes)
+            if routes and isinstance(routes, list):
 
-        unique_apis = sorted(list(set(apis)))
+                for route in routes:
 
-        if not unique_apis:
+                    method = route.get("method")
+                    path = route.get("path")
+
+                    if method and path:
+                        api_set.add(f"{method} {path}")
+
+
+        if not api_set:
             return None
 
-        summary = f"Total APIs: {len(unique_apis)}\n\nAPI Endpoints:\n"
 
-        for api in unique_apis:
+        api_list = sorted(api_set)
+
+        summary = f"Total APIs: {len(api_list)}\n\n"
+
+        summary += "API Endpoints:\n"
+
+        for api in api_list:
             summary += f"- {api}\n"
 
         return summary
