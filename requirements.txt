@@ -1,0 +1,42 @@
+# Core LLM and embeddings
+openai>=1.40.0
+sentence-transformers>=3.0.0
+tiktoken>=0.7.0
+
+# Vector database
+chromadb>=0.5.5
+
+# API framework
+fastapi>=0.112.0
+uvicorn[standard]>=0.30.0
+
+# Environment and config
+python-dotenv>=1.0.1
+
+# File parsing
+pypdf>=4.3.1
+
+# Utilities
+numpy>=1.26.4
+pandas>=2.2.2
+
+# HTTP client
+requests>=2.32.3
+
+# UI templating (for web UI)
+jinja2>=3.1.4
+
+# Async support
+aiofiles>=24.1.0
+
+# Logging and validation
+pydantic>=2.8.2
+
+# Optional but recommended (better performance)
+orjson>=3.10.7
+
+# For future GitHub integration
+gitpython>=3.1.43
+
+# Progress tracking during ingestion
+tqdm>=4.66.5

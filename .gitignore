@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+
+# Vector DB
+db/
+data/codebases/
+data/graph/
+
+# Mac
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log

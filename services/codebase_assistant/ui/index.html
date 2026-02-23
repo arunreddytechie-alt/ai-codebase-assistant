@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Codebase Assistant</title>
+
+    <style>
+
+        body {
+            font-family: Arial;
+            background: #f4f6f8;
+            margin: 40px;
+        }
+
+        .container {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            width: 750px;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        h3 {
+            margin-top: 25px;
+        }
+
+        input, select, button {
+
+            width: 100%;
+            padding: 12px;
+            margin-top: 8px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+
+        button {
+
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #chat {
+
+            margin-top: 20px;
+            padding: 15px;
+            background: #eef1f5;
+            border-radius: 5px;
+            min-height: 100px;
+        }
+
+        .question {
+
+            color: blue;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .answer {
+
+            color: green;
+            white-space: pre-wrap;
+        }
+
+        #ingestStatus {
+
+            font-size: 13px;
+            color: #444;
+            margin-bottom: 10px;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <h2>AI Codebase Assistant</h2>
+
+    <!-- =============================== -->
+    <!-- INGEST SECTION -->
+    <!-- =============================== -->
+
+    <h3>Ingest GitHub Repository</h3>
+
+    <input
+        type="text"
+        id="githubUrl"
+        placeholder="Enter GitHub URL (https://github.com/user/repo)"
+    />
+
+    <button onclick="ingestRepo()">Ingest Repository</button>
+
+    <div id="ingestStatus"></div>
+
+
+    <!-- =============================== -->
+    <!-- REPO SELECT -->
+    <!-- =============================== -->
+
+    <h3>Select Repository</h3>
+
+    <select id="repoSelect"></select>
+
+
+    <!-- =============================== -->
+    <!-- QUESTION SECTION -->
+    <!-- =============================== -->
+
+    <h3>Ask Question</h3>
+
+    <input
+        type="text"
+        id="questionInput"
+        placeholder="Example: How does resume upload work?"
+    />
+
+    <button onclick="askQuestion()">Ask</button>
+
+
+    <!-- =============================== -->
+    <!-- CHAT OUTPUT -->
+    <!-- =============================== -->
+
+    <div id="chat"></div>
+
+</div>
+
+
+<script>
+
+
+// ==========================================
+// LOAD REPOS
+// ==========================================
+
+async function loadRepos() {
+
+    try {
+
+        const response = await fetch("/repos");
+
+        const data = await response.json();
+
+        const select = document.getElementById("repoSelect");
+
+        select.innerHTML = "";
+
+        data.repos.forEach(repo => {
+
+            const option = document.createElement("option");
+
+            option.value = repo;
+            option.text = repo;
+
+            select.appendChild(option);
+
+        });
+
+    }
+    catch (error) {
+
+        console.error("Failed to load repos", error);
+
+    }
+
+}
+
+
+// ==========================================
+// INGEST REPO
+// ==========================================
+
+async function ingestRepo() {
+
+    const url = document.getElementById("githubUrl").value;
+
+    const status = document.getElementById("ingestStatus");
+
+    if (!url) {
+
+        status.innerHTML = "Please enter GitHub URL";
+        return;
+    }
+
+    status.innerHTML = "Ingesting repository...";
+
+
+    try {
+
+        const response = await fetch("/ingest/github", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                github_url: url
+            })
+        });
+
+        const data = await response.json();
+
+        status.innerHTML =
+            "Successfully ingested: " + data.repo_name +
+            " (" + data.chunks_ingested + " chunks)";
+
+
+        // reload repo dropdown
+        await loadRepos();
+
+        // auto select newly ingested repo
+        const repoName = url.split("/").pop();
+
+        document.getElementById("repoSelect").value = repoName;
+
+    }
+    catch (error) {
+
+        status.innerHTML = "Error ingesting repository";
+
+        console.error(error);
+
+    }
+
+}
+
+
+// ==========================================
+// ASK QUESTION
+// ==========================================
+
+async function askQuestion() {
+
+    const repo = document.getElementById("repoSelect").value;
+
+    const question = document.getElementById("questionInput").value;
+
+    const chat = document.getElementById("chat");
+
+
+    if (!repo) {
+
+        chat.innerHTML = "<div class='answer'>Please select repository</div>";
+        return;
+    }
+
+    if (!question) {
+
+        chat.innerHTML = "<div class='answer'>Please enter question</div>";
+        return;
+    }
+
+
+    chat.innerHTML = "Thinking...";
+
+
+    try {
+
+        const response = await fetch("/ask", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                repo_name: repo,
+                question: question
+            })
+        });
+
+
+        const data = await response.json();
+
+
+        // FIX: replace chat instead of append
+        chat.innerHTML = `
+            <div class="question">Q: ${question}</div>
+            <div class="answer">A: ${data.answer}</div>
+        `;
+
+    }
+    catch (error) {
+
+        chat.innerHTML =
+            "<div class='answer'>Error getting answer</div>";
+
+        console.error(error);
+
+    }
+
+}
+
+
+// ==========================================
+// INITIAL LOAD
+// ==========================================
+
+loadRepos();
+
+
+</script>
+
+</body>
+</html>
