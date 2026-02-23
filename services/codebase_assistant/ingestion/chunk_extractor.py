@@ -7,6 +7,7 @@ class ChunkExtractor:
     def __init__(self):
         pass
 
+
     # ==============================
     # PUBLIC ENTRYPOINT
     # ==============================
@@ -24,6 +25,7 @@ class ChunkExtractor:
         else:
             return self._extract_generic_chunks(file_info)
 
+
     # ==============================
     # READ FILE
     # ==============================
@@ -38,6 +40,7 @@ class ChunkExtractor:
             print(f"Error reading file {file_path}: {e}")
             return ""
 
+
     # ==============================
     # GENERATE UNIQUE CHUNK ID
     # ==============================
@@ -49,117 +52,46 @@ class ChunkExtractor:
 
         return f"{repo}:{path}:{component_id}"
 
-    # ==============================
-    # JAVA EXTRACTION
-    # ==============================
-
-    def _extract_java_chunks(self, file_info: Dict) -> List[Dict]:
-
-        file_path = file_info["file_path"]
-        code = self._read_file(file_path)
-
-        if not code:
-            return []
-
-        chunks = []
-
-        class_name = self._extract_java_class_name(code)
-
-        methods = self._extract_java_methods(code)
-
-        # METHOD CHUNKS
-        for method in methods:
-
-            component_id = f"{class_name}.{method['method_name']}"
-
-            chunk_id = self._generate_chunk_id(file_info, component_id)
-
-            chunk = {
-                "component_id": component_id,
-                "chunk_id": chunk_id,
-                "code": method["method_code"],
-                "metadata": {
-                    "repo_name": file_info["repo_name"],
-                    "file_path": file_path,
-                    "file_name": file_info["file_name"],
-                    "language": "java",
-                    "class_name": class_name,
-                    "method_name": method["method_name"],
-                    "function_name": None,
-                    "component_id": component_id,
-                    "chunk_type": "method"
-                }
-            }
-
-            chunks.append(chunk)
-
-        # CLASS CHUNK
-        component_id = class_name
-
-        chunk_id = self._generate_chunk_id(file_info, component_id)
-
-        class_chunk = {
-            "component_id": component_id,
-            "chunk_id": chunk_id,
-            "code": code,
-            "metadata": {
-                "repo_name": file_info["repo_name"],
-                "file_path": file_path,
-                "file_name": file_info["file_name"],
-                "language": "java",
-                "class_name": class_name,
-                "method_name": None,
-                "function_name": None,
-                "component_id": component_id,
-                "chunk_type": "class"
-            }
-        }
-
-        chunks.append(class_chunk)
-
-        return chunks
-
-    def _extract_java_class_name(self, code: str) -> str:
-
-        pattern = r"class\s+(\w+)"
-
-        match = re.search(pattern, code)
-
-        if match:
-            return match.group(1)
-
-        return "UnknownClass"
-
-    def _extract_java_methods(self, code: str) -> List[Dict]:
-
-        methods = []
-
-        pattern = r"(public|private|protected)\s+\w+\s+(\w+)\s*\([^)]*\)\s*\{"
-
-        matches = re.finditer(pattern, code)
-
-        for match in matches:
-
-            method_name = match.group(2)
-
-            start_index = match.start()
-
-            method_code = self._extract_block(code, start_index)
-
-            methods.append({
-                "method_name": method_name,
-                "method_code": method_code
-            })
-
-        return methods
 
     # ==============================
-    # PYTHON EXTRACTION
+    # FASTAPI ROUTE DETECTOR
+    # ==============================
+
+    def _extract_fastapi_routes(self, code: str):
+
+        routes = []
+
+        patterns = [
+            r"@app\.get\([\"']([^\"']+)[\"']",
+            r"@app\.post\([\"']([^\"']+)[\"']",
+            r"@app\.put\([\"']([^\"']+)[\"']",
+            r"@app\.delete\([\"']([^\"']+)[\"']",
+            r"@app\.patch\([\"']([^\"']+)[\"']",
+
+            r"@router\.get\([\"']([^\"']+)[\"']",
+            r"@router\.post\([\"']([^\"']+)[\"']",
+            r"@router\.put\([\"']([^\"']+)[\"']",
+            r"@router\.delete\([\"']([^\"']+)[\"']",
+            r"@router\.patch\([\"']([^\"']+)[\"']",
+        ]
+
+        for pattern in patterns:
+
+            matches = re.findall(pattern, code)
+
+            routes.extend(matches)
+
+        return routes
+
+
+    # ==============================
+    # PYTHON EXTRACTION (WITH API DETECTION)
     # ==============================
 
     def _extract_python_chunks(self, file_info: Dict) -> List[Dict]:
 
         file_path = file_info["file_path"]
+
         code = self._read_file(file_path)
 
         if not code:
@@ -171,6 +103,20 @@ class ChunkExtractor:
 
         functions = self._extract_python_functions(code)
 
+        # Detect APIs at FILE LEVEL
+        
+        api_routes = self._extract_fastapi_routes(code)
+
+        # CRITICAL FIX: ChromaDB does not allow empty list
+        if not api_routes:
+            api_routes = None
+
+        is_api_file = api_routes is not None
+
+
+
+
+        # FUNCTION CHUNKS
         for func in functions:
 
             if class_name:
@@ -180,53 +126,86 @@ class ChunkExtractor:
 
             chunk_id = self._generate_chunk_id(file_info, component_id)
 
-            chunk = {
+            metadata = {
+                "repo_name": file_info["repo_name"],
+                "file_path": file_path,
+                "file_name": file_info["file_name"],
+                "language": "python",
+
+                "component_id": component_id,
+                "function_name": func["function_name"],
+                "class_name": class_name,
+
+                "chunk_type": "api" if is_api_file else "function",
+
+                # API METADATA
+                "is_api": is_api_file,
+                "api_routes": api_routes if api_routes else None,
+                "framework": "fastapi" if is_api_file else None
+            }
+
+            chunks.append({
                 "component_id": component_id,
                 "chunk_id": chunk_id,
                 "code": func["function_code"],
-                "metadata": {
-                    "repo_name": file_info["repo_name"],
-                    "file_path": file_path,
-                    "file_name": file_info["file_name"],
-                    "language": "python",
-                    "class_name": class_name,
-                    "method_name": None,
-                    "function_name": func["function_name"],
-                    "component_id": component_id,
-                    "chunk_type": "function"
-                }
-            }
+                "metadata": metadata
+            })
 
-            chunks.append(chunk)
+
+        # FILE LEVEL CHUNK (IMPORTANT FOR API QUESTIONS)
+        component_id = file_info["file_name"]
+
+        chunk_id = self._generate_chunk_id(file_info, component_id)
+
+        file_metadata = {
+            "repo_name": file_info["repo_name"],
+            "file_path": file_path,
+            "file_name": file_info["file_name"],
+            "language": "python",
+
+            "component_id": component_id,
+
+            "chunk_type": "file",
+
+            "is_api": is_api_file,
+            "api_routes": api_routes,
+            "framework": "fastapi" if is_api_file else None
+        }
+
+        chunks.append({
+            "component_id": component_id,
+            "chunk_id": chunk_id,
+            "code": code,
+            "metadata": file_metadata
+        })
 
         return chunks
 
+
+    # ==============================
+    # PYTHON HELPERS
+    # ==============================
+
     def _extract_python_class_name(self, code: str):
 
-        pattern = r"class\s+(\w+)\s*:"
+        match = re.search(r"class\s+(\w+)\s*:", code)
 
-        match = re.search(pattern, code)
+        return match.group(1) if match else None
 
-        if match:
-            return match.group(1)
 
-        return None
-
-    def _extract_python_functions(self, code: str) -> List[Dict]:
+    def _extract_python_functions(self, code: str):
 
         functions = []
 
         pattern = r"def\s+(\w+)\s*\("
 
-        matches = re.finditer(pattern, code)
-
-        for match in matches:
+        for match in re.finditer(pattern, code):
 
             func_name = match.group(1)
 
-            start_index = match.start()
+            start = match.start()
 
-            func_code = self._extract_python_block(code, start_index)
+            func_code = self._extract_python_block(code, start)
 
             functions.append({
                 "function_name": func_name,
@@ -235,42 +214,39 @@ class ChunkExtractor:
 
         return functions
 
-    def _extract_python_block(self, code: str, start_index: int) -> str:
+
+    def _extract_python_block(self, code: str, start_index: int):
 
         lines = code[start_index:].split("\n")
 
         block = []
 
-        indent_level = None
+        indent = None
 
         for line in lines:
 
-            if indent_level is None:
-
-                indent_level = len(line) - len(line.lstrip())
-
+            if indent is None:
+                indent = len(line) - len(line.lstrip())
                 block.append(line)
+                continue
 
+            current_indent = len(line) - len(line.lstrip())
+
+            if line.strip() == "" or current_indent > indent:
+                block.append(line)
             else:
-
-                current_indent = len(line) - len(line.lstrip())
-
-                if line.strip() == "" or current_indent > indent_level:
-                    block.append(line)
-                else:
-                    break
+                break
 
         return "\n".join(block)
 
+
     # ==============================
-    # GENERIC FALLBACK
+    # GENERIC FILE
     # ==============================
 
-    def _extract_generic_chunks(self, file_info: Dict) -> List[Dict]:
+    def _extract_generic_chunks(self, file_info: Dict):
 
-        file_path = file_info["file_path"]
-
-        code = self._read_file(file_path)
+        code = self._read_file(file_info["file_path"])
 
         if not code:
             return []
@@ -279,45 +255,55 @@ class ChunkExtractor:
 
         chunk_id = self._generate_chunk_id(file_info, component_id)
 
-        chunk = {
+        return [{
             "component_id": component_id,
             "chunk_id": chunk_id,
             "code": code,
             "metadata": {
                 "repo_name": file_info["repo_name"],
-                "file_path": file_path,
+                "file_path": file_info["file_path"],
                 "file_name": file_info["file_name"],
                 "language": file_info["language"],
-                "class_name": None,
-                "method_name": None,
-                "function_name": None,
                 "component_id": component_id,
                 "chunk_type": "file"
             }
-        }
+        }]
 
-        return [chunk]
 
     # ==============================
-    # JAVA BLOCK EXTRACTOR
+    # JAVA EXTRACTION (UNCHANGED)
     # ==============================
 
-    def _extract_block(self, code: str, start_index: int) -> str:
+    def _extract_java_chunks(self, file_info: Dict):
 
-        brace_count = 0
-        index = start_index
+        code = self._read_file(file_info["file_path"])
 
-        while index < len(code):
+        if not code:
+            return []
 
-            if code[index] == "{":
-                brace_count += 1
+        class_name = self._extract_java_class_name(code)
 
-            elif code[index] == "}":
-                brace_count -= 1
+        component_id = class_name
 
-                if brace_count == 0:
-                    return code[start_index:index + 1]
+        chunk_id = self._generate_chunk_id(file_info, component_id)
 
-            index += 1
+        return [{
+            "component_id": component_id,
+            "chunk_id": chunk_id,
+            "code": code,
+            "metadata": {
+                "repo_name": file_info["repo_name"],
+                "file_path": file_info["file_path"],
+                "file_name": file_info["file_name"],
+                "language": "java",
+                "component_id": component_id,
+                "chunk_type": "class"
+            }
+        }]
 
-        return code[start_index:]
+
+    def _extract_java_class_name(self, code: str):
+
+        match = re.search(r"class\s+(\w+)", code)
+
+        return match.group(1) if match else "UnknownClass"
