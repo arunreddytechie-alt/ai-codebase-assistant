@@ -20,4 +20,6 @@ You can ingest any GitHub repository and ask architecture, implementation, or fu
 - Local vector database (ChromaDB)
 - OpenAI powered reasoning
 
----
+Run this command on termnial
+
+PYTHONPATH=. uvicorn services.codebase_assistant.api.main:app --reload --reload-exclude "data/*"
